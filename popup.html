@@ -53,7 +53,7 @@
     }
 
     #not-on-humble {
-      display: none;
+      display: block;
       text-align: center;
       padding: 8px 0 4px;
     }
@@ -108,7 +108,7 @@
     .btn-secondary:hover { background: #33335a; }
 
     #link-list {
-      display: none;
+      display: block;
       margin-top: 14px;
     }
 
@@ -170,7 +170,7 @@
     .link-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
     #progress-area {
-      display: none;
+      display: block;
       margin-top: 14px;
     }
 
@@ -230,7 +230,7 @@
   </div>
 
   <div class="body">
-    <div id="not-on-humble">
+    <div id="not-on-humble" style="display: none;">
       <div class="warning-icon">⚠️</div>
       <div style="font-size:12px; color:#ccccee;">Navigate to your Humble Bundle library page first.</div>
       <div class="hint">humblebundle.com/downloads?key=...</div>
@@ -241,7 +241,7 @@
       <div class="hint">Open your Humble Bundle library page, then click scan.</div>
     </div>
 
-    <div id="link-list">
+    <div id="link-list" style="display: none;">
       <div class="list-header">
         <span>PDFs found</span>
         <span class="link-count" id="link-count">0</span>
@@ -251,9 +251,9 @@
       <button class="btn btn-secondary" id="rescan-btn">↺ Rescan</button>
     </div>
 
-    <div id="progress-area">
+    <div id="progress-area" style="display: none;">
       <div class="progress-label">
-        <span>Progress</span>
+        <span>Overall progress</span>
         <span id="progress-fraction">0 / 0</span>
       </div>
       <div class="progress-bar-track">

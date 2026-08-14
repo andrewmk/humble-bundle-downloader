@@ -35,7 +35,7 @@ function handleProgress(msg) {
   if (msg.status === 'idle' || msg.status === 'queued') return;
 
   if (msg.status === 'downloading' || msg.status === 'error') {
-    hide(scanArea); hide(linkList); hide(doneArea);
+    hide(scanArea); hide(doneArea);
     show(progressArea);
 
     const pct = msg.total > 0 ? (msg.done / msg.total) * 100 : 0;
@@ -49,7 +49,7 @@ function handleProgress(msg) {
   }
 
   if (msg.status === 'done' || msg.status === 'cancelled') {
-    hide(scanArea); hide(linkList); hide(progressArea);
+    hide(scanArea); hide(progressArea);
     show(doneArea);
     if (msg.status === 'cancelled') {
       doneArea.querySelector('.status-done').textContent = '⚠️ Downloads cancelled.';
@@ -71,6 +71,7 @@ function updateDots(done, current) {
 }
 
 function renderLinks(links) {
+  console.log("In renderLinks...");
   linksScroll.innerHTML = '';
   links.forEach(link => {
     const div = document.createElement('div');
@@ -110,7 +111,7 @@ async function scanPage() {
     console.log("Sending message to content script...");
     const results = await chrome.tabs.sendMessage(tab.id, { action: 'getPdfLinks' });
     foundLinks = results?.links || [];
-    console.log("Got links: " + foundLinks.length;
+    console.log("Got links: " + foundLinks.length);
   } catch(e) {
     // Content script might not be injected yet, try injecting
     await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['content.js'] });
@@ -142,7 +143,6 @@ rescanBtn.addEventListener('click', () => {
 startBtn.addEventListener('click', () => {
   if (!port) connectPort();
   port.postMessage({ action: 'startQueue', links: foundLinks });
-  hide(linkList);
   show(progressArea);
   progressBar.style.width = '0%';
   progressFraction.textContent = `0 / ${foundLinks.length}`;
