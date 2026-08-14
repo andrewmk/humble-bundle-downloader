@@ -1,0 +1,31 @@
+{
+  "manifest_version": 3,
+  "name": "Humble Bundle Sequential Downloader",
+  "version": "1.0",
+  "description": "Downloads PDFs from Humble Bundle one at a time, waiting for each to finish before starting the next.",
+  "permissions": [
+    "downloads",
+    "activeTab",
+    "scripting"
+  ],
+  "host_permissions": [
+    "https://www.humblebundle.com/*"
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icon16.png",
+      "48": "icon48.png",
+      "128": "icon128.png"
+    }
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://www.humblebundle.com/*"],
+      "js": ["content.js"]
+    }
+  ]
+}

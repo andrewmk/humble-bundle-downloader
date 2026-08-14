@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Humble Downloader</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      width: 320px;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      background: #1a1a2e;
+      color: #e8e8f0;
+      padding: 0;
+      user-select: none;
+    }
+
+    .header {
+      background: linear-gradient(135deg, #cc4e00 0%, #e8720c 100%);
+      padding: 16px 18px 14px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .header-icon {
+      font-size: 22px;
+      line-height: 1;
+    }
+
+    .header h1 {
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: #fff;
+      line-height: 1.2;
+    }
+
+    .header p {
+      font-size: 10px;
+      color: rgba(255,255,255,0.75);
+      margin-top: 1px;
+    }
+
+    .body {
+      padding: 16px 18px;
+    }
+
+    #scan-area {
+      text-align: center;
+    }
+
+    #not-on-humble {
+      display: none;
+      text-align: center;
+      padding: 8px 0 4px;
+    }
+
+    .warning-icon { font-size: 28px; margin-bottom: 6px; }
+
+    .hint {
+      font-size: 11px;
+      color: #8888aa;
+      margin-top: 6px;
+      line-height: 1.5;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      padding: 10px 18px;
+      border-radius: 8px;
+      border: none;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s;
+      width: 100%;
+      justify-content: center;
+    }
+
+    .btn-primary {
+      background: #e8720c;
+      color: #fff;
+    }
+    .btn-primary:hover { background: #cc5f00; }
+    .btn-primary:disabled {
+      background: #3a3a55;
+      color: #666688;
+      cursor: not-allowed;
+    }
+
+    .btn-danger {
+      background: #5a1a1a;
+      color: #ff8888;
+      margin-top: 8px;
+    }
+    .btn-danger:hover { background: #7a2020; }
+
+    .btn-secondary {
+      background: #2a2a45;
+      color: #aaaacc;
+      margin-top: 8px;
+    }
+    .btn-secondary:hover { background: #33335a; }
+
+    #link-list {
+      display: none;
+      margin-top: 14px;
+    }
+
+    .list-header {
+      font-size: 11px;
+      font-weight: 700;
+      color: #aaaacc;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      margin-bottom: 8px;
+      display: flex;
+      justify-content: space-between;
+    }
+
+    .link-count {
+      background: #e8720c;
+      color: #fff;
+      border-radius: 20px;
+      padding: 1px 8px;
+      font-size: 10px;
+    }
+
+    .links-scroll {
+      max-height: 140px;
+      overflow-y: auto;
+      border: 1px solid #2a2a45;
+      border-radius: 7px;
+    }
+
+    .links-scroll::-webkit-scrollbar { width: 4px; }
+    .links-scroll::-webkit-scrollbar-track { background: #1a1a2e; }
+    .links-scroll::-webkit-scrollbar-thumb { background: #3a3a60; border-radius: 4px; }
+
+    .link-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 10px;
+      border-bottom: 1px solid #22223a;
+      font-size: 11px;
+      color: #c0c0e0;
+    }
+    .link-item:last-child { border-bottom: none; }
+
+    .link-dot {
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      background: #3a3a60;
+      flex-shrink: 0;
+    }
+    .link-dot.done { background: #4caf50; }
+    .link-dot.active { background: #e8720c; animation: pulse 0.8s infinite; }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.4; }
+    }
+
+    .link-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+    #progress-area {
+      display: none;
+      margin-top: 14px;
+    }
+
+    .progress-label {
+      font-size: 11px;
+      color: #8888aa;
+      margin-bottom: 6px;
+      display: flex;
+      justify-content: space-between;
+    }
+
+    .progress-bar-track {
+      background: #2a2a45;
+      border-radius: 6px;
+      height: 8px;
+      overflow: hidden;
+    }
+
+    .progress-bar-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #cc4e00, #e8720c);
+      border-radius: 6px;
+      transition: width 0.3s ease;
+      width: 0%;
+    }
+
+    .current-file {
+      font-size: 10px;
+      color: #888aaa;
+      margin-top: 6px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .status-done {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: #0d2b0d;
+      border: 1px solid #1e4d1e;
+      border-radius: 8px;
+      padding: 10px 12px;
+      font-size: 12px;
+      color: #88dd88;
+      margin-top: 14px;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="header-icon">📦</div>
+    <div>
+      <h1>Humble Downloader</h1>
+      <p>Sequential PDF downloader</p>
+    </div>
+  </div>
+
+  <div class="body">
+    <div id="not-on-humble">
+      <div class="warning-icon">⚠️</div>
+      <div style="font-size:12px; color:#ccccee;">Navigate to your Humble Bundle library page first.</div>
+      <div class="hint">humblebundle.com/downloads?key=...</div>
+    </div>
+
+    <div id="scan-area">
+      <button class="btn btn-primary" id="scan-btn">🔍 Scan for PDF Links</button>
+      <div class="hint">Open your Humble Bundle library page, then click scan.</div>
+    </div>
+
+    <div id="link-list">
+      <div class="list-header">
+        <span>PDFs found</span>
+        <span class="link-count" id="link-count">0</span>
+      </div>
+      <div class="links-scroll" id="links-scroll"></div>
+      <button class="btn btn-primary" id="start-btn" style="margin-top:12px">⬇ Download All</button>
+      <button class="btn btn-secondary" id="rescan-btn">↺ Rescan</button>
+    </div>
+
+    <div id="progress-area">
+      <div class="progress-label">
+        <span>Progress</span>
+        <span id="progress-fraction">0 / 0</span>
+      </div>
+      <div class="progress-bar-track">
+        <div class="progress-bar-fill" id="progress-bar"></div>
+      </div>
+      <div class="current-file" id="current-file"></div>
+      <button class="btn btn-danger" id="cancel-btn">✕ Cancel</button>
+    </div>
+
+    <div id="done-area" style="display:none">
+      <div class="status-done">✅ All downloads complete!</div>
+      <button class="btn btn-secondary" id="restart-btn" style="margin-top:10px">↺ Start over</button>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
