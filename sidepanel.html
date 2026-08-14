@@ -7,13 +7,16 @@
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
 
+    html, body {
+      height: 100%;
+    }
+
     body {
-      width: 320px;
+      min-width: 280px;
       font-family: 'Segoe UI', system-ui, sans-serif;
       background: #1a1a2e;
       color: #e8e8f0;
       padding: 0;
-      user-select: none;
     }
 
     .header {
@@ -132,7 +135,8 @@
     }
 
     .links-scroll {
-      max-height: 140px;
+      max-height: calc(100vh - 300px);
+      min-height: 60px;
       overflow-y: auto;
       border: 1px solid #2a2a45;
       border-radius: 7px;
@@ -195,6 +199,10 @@
       border-radius: 6px;
       transition: width 0.3s ease;
       width: 0%;
+    }
+
+    .file-progress-bar-fill {
+      background: linear-gradient(90deg, #3a6ea5, #5b9bd5);
     }
 
     .current-file {
@@ -260,6 +268,16 @@
         <div class="progress-bar-fill" id="progress-bar"></div>
       </div>
       <div class="current-file" id="current-file"></div>
+
+      <div class="progress-label" id="file-progress-label" style="margin-top:12px">
+        <span>Current file</span>
+        <span id="file-progress-fraction"></span>
+      </div>
+      <div class="progress-bar-track">
+        <div class="progress-bar-fill file-progress-bar-fill" id="file-progress-bar"></div>
+      </div>
+
+      <div class="links-scroll" id="progress-links-scroll" style="margin-top:12px"></div>
       <button class="btn btn-danger" id="cancel-btn">✕ Cancel</button>
     </div>
 
@@ -269,6 +287,6 @@
     </div>
   </div>
 
-  <script src="popup.js"></script>
+  <script src="sidepanel.js"></script>
 </body>
 </html>

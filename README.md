@@ -13,7 +13,7 @@ A Chrome extension that downloads PDFs from your Humble Bundle library one at a 
 
 1. Open your Humble Bundle library/download page  
    (e.g. `https://www.humblebundle.com/downloads?key=YOURKEY`)
-2. Click the extension icon in the Chrome toolbar
+2. Click the extension icon in the Chrome toolbar — this opens the side panel, which stays docked to the browser window as you navigate
 3. Click **Scan for PDF Links** — it will find all PDF download links on the page
 4. Review the list, then click **Download All**
 5. Each PDF downloads fully before the next one begins
@@ -24,3 +24,4 @@ A Chrome extension that downloads PDFs from your Humble Bundle library one at a 
 - If a PDF already exists, Chrome will append a number to avoid overwriting
 - You can cancel mid-queue at any time
 - The extension only activates on `humblebundle.com` pages
+- The side panel persists across tab switches and page navigation within the window; it automatically updates whether you're on a Humble Bundle page
