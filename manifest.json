@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Humble Bundle Sequential Downloader",
-  "version": "1.0",
+  "version": "1.1.0",
   "description": "Downloads comics and books from Humble Bundle one at a time, waiting for each to finish before starting the next.",
   "permissions": [
     "downloads",
