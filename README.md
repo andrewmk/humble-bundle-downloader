@@ -25,4 +25,4 @@ A Chrome extension that downloads comics and books from your Humble Bundle libra
 - Works with whatever formats Humble Bundle offers for a given title (PDF, EPUB, MOBI, CBZ, CBR, etc.) — the extension keeps each file's original format
 - You can cancel mid-queue at any time
 - The extension only activates on `humblebundle.com` pages
-- The side panel persists across tab switches and page navigation within the window; it automatically updates whether you're on a Humble Bundle page
+- The side panel persists across tab switches and page navigation within the window; it automatically updates based on whether or not you're on a Humble Bundle page
