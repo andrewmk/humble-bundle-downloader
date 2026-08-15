@@ -15,6 +15,7 @@ const cancelBtn = document.getElementById('cancel-btn');
 const restartBtn = document.getElementById('restart-btn');
 const selectAllBtn = document.getElementById('select-all-btn');
 const selectNoneBtn = document.getElementById('select-none-btn');
+const selectTypeActions = document.getElementById('select-type-actions');
 
 const linksScroll = document.getElementById('links-scroll');
 const progressLinksScroll = document.getElementById('progress-links-scroll');
@@ -147,7 +148,42 @@ function renderLinks(links) {
     cb.addEventListener('change', updateSelectionUI);
   });
 
+  renderTypeChips(links);
   updateSelectionUI();
+}
+
+function renderTypeChips(links) {
+  // One chip per distinct file extension present in this scan, so the
+  // filter row always matches whatever formats this particular bundle has
+  // (PDF, EPUB, MOBI, CBZ, CBR...) rather than a fixed hardcoded list.
+  const counts = new Map();
+  links.forEach(link => {
+    const ext = getExtensionLabel(link.url) || 'Other';
+    counts.set(ext, (counts.get(ext) || 0) + 1);
+  });
+
+  if (counts.size <= 1) {
+    // Nothing to filter by when everything's the same type (or unknown).
+    selectTypeActions.innerHTML = '';
+    return;
+  }
+
+  const chips = [...counts.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([ext, count]) =>
+      `<button class="type-chip" data-ext="${escHtml(ext)}">${escHtml(ext)} (${count})</button>`
+    ).join('');
+  selectTypeActions.innerHTML = chips;
+
+  selectTypeActions.querySelectorAll('.type-chip').forEach(chip => {
+    chip.addEventListener('click', () => {
+      const ext = chip.dataset.ext;
+      linksScroll.querySelectorAll('.link-check').forEach((cb, i) => {
+        cb.checked = (getExtensionLabel(foundLinks[i].url) || 'Other') === ext;
+      });
+      updateSelectionUI();
+    });
+  });
 }
 
 function getSelectedLinks() {

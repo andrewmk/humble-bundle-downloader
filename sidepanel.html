@@ -180,6 +180,8 @@
       display: flex;
       gap: 6px;
       margin-bottom: 8px;
+      flex-wrap: wrap;
+      align-items: center;
     }
 
     .link-action {
@@ -196,6 +198,22 @@
     .link-action:hover { color: #ff9433; }
 
     .select-sep { color: #3a3a55; font-size: 10px; }
+
+    .type-chip {
+      background: #22223a;
+      border: 1px solid #33334f;
+      color: #a8a8d0;
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+      padding: 3px 8px;
+      border-radius: 10px;
+      cursor: pointer;
+    }
+    .type-chip:hover {
+      border-color: #e8720c;
+      color: #ff9433;
+    }
 
     @keyframes pulse {
       0%, 100% { opacity: 1; }
@@ -290,6 +308,7 @@
         <span class="select-sep">|</span>
         <button class="link-action" id="select-none-btn">Select none</button>
       </div>
+      <div class="select-actions" id="select-type-actions"></div>
       <div class="links-scroll" id="links-scroll"></div>
       <button class="btn btn-primary" id="start-btn" style="margin-top:12px">⬇ Download Selected</button>
       <button class="btn btn-secondary" id="rescan-btn">↺ Rescan</button>
