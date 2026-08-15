@@ -13,6 +13,7 @@ chrome.sidePanel
   .catch((error) => console.error(error));
 
 let queue = [];
+let allItems = []; // full original list for the active run, for panels that (re)connect mid-download
 let isDownloading = false;
 let currentDownloadId = null;
 const panelPorts = new Set();
@@ -27,7 +28,7 @@ const STATE_KEY = 'downloadQueueState';
 async function persistState() {
   try {
     await chrome.storage.session.set({
-      [STATE_KEY]: { queue, progress, currentDownloadId }
+      [STATE_KEY]: { queue, allItems, progress, currentDownloadId }
     });
   } catch (err) {
     console.error('Failed to persist state:', err);
@@ -41,6 +42,7 @@ async function restoreState() {
     if (!saved) return;
 
     queue = saved.queue || [];
+    allItems = saved.allItems || [];
     progress = saved.progress || progress;
     currentDownloadId = saved.currentDownloadId ?? null;
     isDownloading = false;
@@ -89,7 +91,7 @@ restoreState();
 function broadcastProgress() {
   persistState();
   for (const port of panelPorts) {
-    try { port.postMessage({ type: 'progress', ...progress }); } catch {}
+    try { port.postMessage({ type: 'progress', ...progress, items: allItems }); } catch {}
   }
 }
 
@@ -140,7 +142,7 @@ async function downloadNext() {
   try {
     const downloadId = await chrome.downloads.download({
       url: item.url,
-      filename: sanitizeFilename(item.title) + '.pdf',
+      filename: sanitizeFilename(item.title) + getExtension(item.url),
       saveAs: false,
       conflictAction: 'uniquify'
     });
@@ -193,12 +195,13 @@ chrome.downloads.onChanged.addListener((delta) => {
 chrome.runtime.onConnect.addListener((port) => {
   if (port.name === 'sidepanel') {
     panelPorts.add(port);
-    port.postMessage({ type: 'progress', ...progress });
+    port.postMessage({ type: 'progress', ...progress, items: allItems });
 
     port.onMessage.addListener((msg) => {
       if (msg.action === 'startQueue') {
         stopPolling();
         queue = msg.links.slice();
+        allItems = msg.links.slice();
         progress = {
           done: 0, total: queue.length, current: '', status: 'queued',
           currentBytesReceived: 0, currentTotalBytes: 0
@@ -220,7 +223,23 @@ chrome.runtime.onConnect.addListener((port) => {
         progress.currentTotalBytes = 0;
         broadcastProgress();
       } else if (msg.action === 'getProgress') {
-        port.postMessage({ type: 'progress', ...progress });
+        port.postMessage({ type: 'progress', ...progress, items: allItems });
+      } else if (msg.action === 'acknowledgeDone') {
+        // User dismissed the done/cancelled screen ("Start over"). Reset to
+        // idle so this terminal status doesn't keep reappearing on future
+        // reconnects (new panel opens, service-worker restarts, etc).
+        if (progress.status === 'done' || progress.status === 'cancelled') {
+          stopPolling();
+          queue = [];
+          allItems = [];
+          currentDownloadId = null;
+          isDownloading = false;
+          progress = {
+            done: 0, total: 0, current: '', status: 'idle',
+            currentBytesReceived: 0, currentTotalBytes: 0
+          };
+          broadcastProgress();
+        }
       }
     });
 
@@ -236,5 +255,17 @@ function sanitizeFilename(name) {
     .replace(/\s+/g, ' ')
     .trim()
     .substring(0, 180)
-    || 'humble_pdf';
+    || 'humble_download';
+}
+
+function getExtension(url) {
+  // Comics and books come in many formats (pdf, epub, mobi, cbz, cbr...);
+  // pull the real extension from the download URL instead of assuming one.
+  try {
+    const path = new URL(url).pathname;
+    const match = path.match(/\.([a-z0-9]{1,6})$/i);
+    return match ? '.' + match[1].toLowerCase() : '';
+  } catch {
+    return '';
+  }
 }

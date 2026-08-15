@@ -1,6 +1,6 @@
-// Content script: scrapes PDF download links from the Humble Bundle page
+// Content script: scrapes comic/book download links from the Humble Bundle page
 
-function getPdfLinks() {
+function getDownloadLinks() {
   const links = [];
 
   console.log("Scanning for links...");
@@ -30,9 +30,9 @@ function getPdfLinks() {
 
 // Listen for messages from the popup
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-  if (msg.action === 'getPdfLinks') {
-    console.log("Received message getPdfLinks...");
-    const links = getPdfLinks();
+  if (msg.action === 'getDownloadLinks') {
+    console.log("Received message getDownloadLinks...");
+    const links = getDownloadLinks();
     sendResponse({ links });
   }
   return true;

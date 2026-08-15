@@ -157,6 +157,16 @@
     }
     .link-item:last-child { border-bottom: none; }
 
+    .link-item.unselected { opacity: 0.45; }
+
+    .link-check {
+      flex-shrink: 0;
+      width: 13px;
+      height: 13px;
+      accent-color: #e8720c;
+      cursor: pointer;
+    }
+
     .link-dot {
       width: 6px; height: 6px;
       border-radius: 50%;
@@ -165,6 +175,27 @@
     }
     .link-dot.done { background: #4caf50; }
     .link-dot.active { background: #e8720c; animation: pulse 0.8s infinite; }
+
+    .select-actions {
+      display: flex;
+      gap: 6px;
+      margin-bottom: 8px;
+    }
+
+    .link-action {
+      background: none;
+      border: none;
+      color: #e8720c;
+      font-size: 10px;
+      font-weight: 600;
+      cursor: pointer;
+      padding: 0;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+    }
+    .link-action:hover { color: #ff9433; }
+
+    .select-sep { color: #3a3a55; font-size: 10px; }
 
     @keyframes pulse {
       0%, 100% { opacity: 1; }
@@ -233,7 +264,7 @@
     <div class="header-icon">📦</div>
     <div>
       <h1>Humble Downloader</h1>
-      <p>Sequential PDF downloader</p>
+      <p>Sequential comic &amp; book downloader</p>
     </div>
   </div>
 
@@ -245,17 +276,22 @@
     </div>
 
     <div id="scan-area">
-      <button class="btn btn-primary" id="scan-btn">🔍 Scan for PDF Links</button>
+      <button class="btn btn-primary" id="scan-btn">🔍 Scan for Links</button>
       <div class="hint">Open your Humble Bundle library page, then click scan.</div>
     </div>
 
     <div id="link-list" style="display: none;">
       <div class="list-header">
-        <span>PDFs found</span>
+        <span>Files found</span>
         <span class="link-count" id="link-count">0</span>
       </div>
+      <div class="select-actions">
+        <button class="link-action" id="select-all-btn">Select all</button>
+        <span class="select-sep">|</span>
+        <button class="link-action" id="select-none-btn">Select none</button>
+      </div>
       <div class="links-scroll" id="links-scroll"></div>
-      <button class="btn btn-primary" id="start-btn" style="margin-top:12px">⬇ Download All</button>
+      <button class="btn btn-primary" id="start-btn" style="margin-top:12px">⬇ Download Selected</button>
       <button class="btn btn-secondary" id="rescan-btn">↺ Rescan</button>
     </div>
 
