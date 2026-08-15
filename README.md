@@ -7,7 +7,7 @@ A Chrome extension that downloads comics and books from your Humble Bundle libra
 1. Open Chrome and go to `chrome://extensions`
 2. Enable **Developer mode** (toggle in the top-right corner)
 3. Click **Load unpacked**
-4. Select the `humble-downloader` folder
+4. Select the `humble-bundle-downloader` folder
 
 ## Usage
 
