@@ -1,6 +1,7 @@
 let port = null;
-let foundLinks = [];
+let foundLinks = [];       // links in original page-scan order (never mutated)
 let isQueueActive = false; // true while a download queue is running/queued
+let sortMode = 'page';     // 'page' or 'alphabetical'
 
 const scanArea = document.getElementById('scan-area');
 const notOnHumble = document.getElementById('not-on-humble');
@@ -16,6 +17,7 @@ const restartBtn = document.getElementById('restart-btn');
 const selectAllBtn = document.getElementById('select-all-btn');
 const selectNoneBtn = document.getElementById('select-none-btn');
 const selectTypeActions = document.getElementById('select-type-actions');
+const sortToggleBtn = document.getElementById('sort-toggle-btn');
 
 const linksScroll = document.getElementById('links-scroll');
 const progressLinksScroll = document.getElementById('progress-links-scroll');
@@ -134,15 +136,39 @@ function updateDots(done, current) {
   }
 }
 
-function renderLinks(links) {
+function getOrderedLinks() {
+  if (sortMode === 'alphabetical') {
+    return [...foundLinks].sort((a, b) =>
+      displayTitle(a).localeCompare(displayTitle(b), undefined, { sensitivity: 'base' })
+    );
+  }
+  return foundLinks;
+}
+
+function renderLinks() {
   console.log("In renderLinks...");
-  // Selectable checklist shown during the scan step.
-  const selectMarkup = links.map((link, i) =>
-    `<label class="link-item" data-name="${escHtml(link.title)}">
-      <input type="checkbox" class="link-check" data-index="${i}" checked>
+  const links = getOrderedLinks();
+
+  // Preserve whatever is currently checked/unchecked (keyed by index into
+  // foundLinks) so that re-sorting doesn't reset selections. On the very
+  // first render there's nothing on screen yet, so everything defaults on.
+  const hasExistingList = linksScroll.querySelectorAll('.link-check').length > 0;
+  const checkedIndexes = new Set();
+  linksScroll.querySelectorAll('.link-check').forEach(cb => {
+    if (cb.checked) checkedIndexes.add(Number(cb.dataset.index));
+  });
+
+  // Selectable checklist shown during the scan step. data-index refers to
+  // the position in foundLinks (the original scan order), not the possibly
+  // re-sorted display order, so selection/state stays tied to the right link.
+  const selectMarkup = links.map(link => {
+    const i = foundLinks.indexOf(link);
+    const isChecked = hasExistingList ? checkedIndexes.has(i) : true;
+    return `<label class="link-item" data-name="${escHtml(link.title)}">
+      <input type="checkbox" class="link-check" data-index="${i}" ${isChecked ? 'checked' : ''}>
       <div class="link-name" title="${escHtml(displayTitle(link))}">${escHtml(displayTitle(link))}</div>
-    </label>`
-  ).join('');
+    </label>`;
+  }).join('');
   linksScroll.innerHTML = selectMarkup;
   linksScroll.querySelectorAll('.link-check').forEach(cb => {
     cb.addEventListener('change', updateSelectionUI);
@@ -178,8 +204,9 @@ function renderTypeChips(links) {
   selectTypeActions.querySelectorAll('.type-chip').forEach(chip => {
     chip.addEventListener('click', () => {
       const ext = chip.dataset.ext;
-      linksScroll.querySelectorAll('.link-check').forEach((cb, i) => {
-        cb.checked = (getExtensionLabel(foundLinks[i].url) || 'Other') === ext;
+      linksScroll.querySelectorAll('.link-check').forEach(cb => {
+        const link = foundLinks[Number(cb.dataset.index)];
+        cb.checked = (getExtensionLabel(link.url) || 'Other') === ext;
       });
       updateSelectionUI();
     });
@@ -187,8 +214,15 @@ function renderTypeChips(links) {
 }
 
 function getSelectedLinks() {
-  const checks = linksScroll.querySelectorAll('.link-check');
-  return foundLinks.filter((_, i) => checks[i]?.checked);
+  // Checkboxes may be rendered in a different order than foundLinks (when
+  // alphabetical sort is active), so look up selection by data-index rather
+  // than by DOM position. Downloads still proceed in the currently
+  // displayed (sorted) order.
+  const selectedIndexes = new Set();
+  linksScroll.querySelectorAll('.link-check').forEach(cb => {
+    if (cb.checked) selectedIndexes.add(Number(cb.dataset.index));
+  });
+  return getOrderedLinks().filter((link) => selectedIndexes.has(foundLinks.indexOf(link)));
 }
 
 function updateSelectionUI() {
@@ -270,7 +304,7 @@ async function scanPage() {
     return;
   }
 
-  renderLinks(foundLinks);
+  renderLinks();
   hide(scanArea);
   show(linkList);
 }
@@ -291,6 +325,25 @@ selectAllBtn.addEventListener('click', () => {
 selectNoneBtn.addEventListener('click', () => {
   linksScroll.querySelectorAll('.link-check').forEach(cb => cb.checked = false);
   updateSelectionUI();
+});
+
+function updateSortToggleLabel() {
+  sortToggleBtn.textContent = sortMode === 'alphabetical' ? 'Sort: A–Z' : 'Sort: Page order';
+}
+
+sortToggleBtn.addEventListener('click', () => {
+  sortMode = sortMode === 'alphabetical' ? 'page' : 'alphabetical';
+  updateSortToggleLabel();
+  chrome.storage.local.set({ sortMode });
+  if (foundLinks.length) renderLinks();
+});
+
+// Restore the user's preferred sort order, if any, before the first scan.
+chrome.storage.local.get('sortMode', (data) => {
+  if (data.sortMode === 'alphabetical' || data.sortMode === 'page') {
+    sortMode = data.sortMode;
+    updateSortToggleLabel();
+  }
 });
 
 startBtn.addEventListener('click', () => {
