@@ -28,3 +28,13 @@ A Chrome extension that downloads comics and books from your Humble Bundle libra
 - You can cancel mid-queue at any time
 - The extension only activates on `humblebundle.com` pages
 - The side panel persists across tab switches and page navigation within the window; it automatically updates based on whether or not you're on a Humble Bundle page
+
+## Screenshots
+
+### Pick which files to download
+
+![Select which files to download](screenshots/select-list.png)
+
+### Progress display
+
+![Progress display](screenshots/progress-display.png)
