@@ -1,6 +1,6 @@
-# Humble Bundle Sequential Downloader
+# Humble Bundle Downloader
 
-A Chrome extension that downloads comics and books from your Humble Bundle library one at a time, waiting for each to finish before starting the next.
+A Chrome extension that downloads comics and books from your Humble Bundle library, with a configurable number of files downloading at the same time (1-8, default 4).
 
 ## Installation
 
@@ -18,7 +18,13 @@ A Chrome extension that downloads comics and books from your Humble Bundle libra
 2. Click the extension icon in the Chrome toolbar — this opens the side panel, which stays docked to the browser window as you navigate
 3. Click **Scan for Links** — it will find all comic and book download links on the page
 4. Review the list, check or uncheck any titles you don't want, then click **Download Selected**
-5. Each file downloads fully before the next one begins
+5. Files download in parallel — by default up to 4 at a time (see **Settings** below)
+
+## Settings
+
+Click the ⚙ gear in the side panel header to open the settings screen.
+
+- **Simultaneous downloads** — how many files to download at the same time (1-8, default 4). Set it to 1 to go back to one-at-a-time. Changes apply immediately, even to a run that's already in progress.
 
 ## Notes
 
@@ -26,6 +32,7 @@ A Chrome extension that downloads comics and books from your Humble Bundle libra
 - If a file already exists, Chrome will append a number to avoid overwriting
 - Works with whatever formats Humble Bundle offers for a given title (PDF, EPUB, MOBI, CBZ, CBR, etc.) — the extension keeps each file's original format
 - You can cancel mid-queue at any time
+- When downloads run in parallel, files may finish out of order — the progress list reflects each file's actual state
 - The extension only activates on `humblebundle.com` pages
 - The side panel persists across tab switches and page navigation within the window; it automatically updates based on whether or not you're on a Humble Bundle page
 

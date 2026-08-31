@@ -24,10 +24,14 @@ const progressLinksScroll = document.getElementById('progress-links-scroll');
 const linkCount = document.getElementById('link-count');
 const progressBar = document.getElementById('progress-bar');
 const progressFraction = document.getElementById('progress-fraction');
-const currentFile = document.getElementById('current-file');
-const fileProgressBar = document.getElementById('file-progress-bar');
-const fileProgressFraction = document.getElementById('file-progress-fraction');
-const fileProgressLabel = document.getElementById('file-progress-label');
+const activeFilesTitle = document.getElementById('active-files-title');
+const activeFiles = document.getElementById('active-files');
+
+const mainView = document.getElementById('main-view');
+const settingsView = document.getElementById('settings-view');
+const settingsBtn = document.getElementById('settings-btn');
+const backBtn = document.getElementById('back-btn');
+const maxParallelInput = document.getElementById('max-parallel-input');
 
 function show(el) { el.style.display = ''; }
 function hide(el) { el.style.display = 'none'; }
@@ -70,12 +74,11 @@ function handleProgress(msg) {
     const pct = msg.total > 0 ? (msg.done / msg.total) * 100 : 0;
     progressBar.style.width = pct + '%';
     progressFraction.textContent = `${msg.done} / ${msg.total}`;
-    currentFile.textContent = msg.current ? `Downloading: ${msg.current}` : '';
 
-    updateFileProgress(msg.currentBytesReceived, msg.currentTotalBytes);
+    renderActiveFiles(msg.active || []);
 
     // Update dots
-    updateDots(msg.done, msg.current);
+    updateDots(msg);
     return;
   }
 
@@ -83,7 +86,7 @@ function handleProgress(msg) {
     isQueueActive = false;
     hide(scanArea); hide(progressArea);
     show(doneArea);
-    updateFileProgress(0, 0);
+    clearActiveFiles();
     if (msg.status === 'cancelled') {
       doneArea.querySelector('.status-done').textContent = '⚠️ Downloads cancelled.';
     } else {
@@ -98,37 +101,101 @@ function formatBytes(bytes) {
   return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
 }
 
-function updateFileProgress(received, total) {
-  received = received || 0;
-  total = total || 0;
+// One row per in-flight download, kept in sync with the `active` array in
+// each progress message (rows appear/disappear as downloads start/finish).
+// Keyed by url, which is unique per run (the scan dedupes by url).
+const activeFileRows = new Map();
 
-  if (total > 0) {
-    const pct = Math.min(100, (received / total) * 100);
-    fileProgressBar.style.width = pct + '%';
-    fileProgressFraction.textContent = `${formatBytes(received)} / ${formatBytes(total)}`;
-  } else {
-    // Server didn't report a content length (or hasn't started yet) —
-    // show received bytes without a meaningful percentage.
-    fileProgressBar.style.width = received > 0 ? '100%' : '0%';
-    fileProgressFraction.textContent = received > 0 ? formatBytes(received) : '';
+function renderActiveFiles(active) {
+  activeFilesTitle.textContent =
+    active.length === 1 ? 'Downloading' : `Downloading ${active.length} files`;
+
+  const activeUrls = new Set();
+  for (const a of active) {
+    activeUrls.add(a.url);
+    let row = activeFileRows.get(a.url);
+    if (!row) {
+      row = buildActiveFileRow(a.title, a.url);
+      activeFiles.appendChild(row);
+      activeFileRows.set(a.url, row);
+    }
+    updateActiveFileRow(row, a);
+  }
+  for (const [url, row] of [...activeFileRows]) {
+    if (!activeUrls.has(url)) {
+      row.remove();
+      activeFileRows.delete(url);
+    }
   }
 }
 
-function updateDots(done, current) {
+function buildActiveFileRow(title, url) {
+  const row = document.createElement('div');
+  row.className = 'active-file';
+
+  const name = document.createElement('div');
+  name.className = 'active-file-name';
+  const shown = displayTitle({ title, url });
+  name.textContent = shown;
+  name.title = shown;
+
+  const track = document.createElement('div');
+  track.className = 'progress-bar-track';
+  const fill = document.createElement('div');
+  fill.className = 'progress-bar-fill file-progress-bar-fill active-file-bar';
+  track.appendChild(fill);
+
+  const meta = document.createElement('div');
+  meta.className = 'active-file-meta';
+
+  row.appendChild(name);
+  row.appendChild(track);
+  row.appendChild(meta);
+  return row;
+}
+
+function updateActiveFileRow(row, a) {
+  const received = a.bytesReceived || 0;
+  const total = a.totalBytes || 0;
+  const fill = row.querySelector('.active-file-bar');
+  const meta = row.querySelector('.active-file-meta');
+
+  if (total > 0) {
+    const pct = Math.min(100, (received / total) * 100);
+    fill.style.width = pct + '%';
+    meta.textContent = `${Math.floor(pct)}% · ${formatBytes(received)} / ${formatBytes(total)}`;
+  } else {
+    // Server didn't report a content length (or hasn't started yet) —
+    // show received bytes without a meaningful percentage.
+    fill.style.width = received > 0 ? '100%' : '0%';
+    meta.textContent = received > 0 ? formatBytes(received) : 'Starting…';
+  }
+}
+
+function clearActiveFiles() {
+  activeFileRows.clear();
+  activeFiles.innerHTML = '';
+}
+
+function updateDots(msg) {
   // Only the progress-step list has dots; the scan-step list uses
   // checkboxes instead and is hidden once downloading starts.
+  // Downloads can finish out of order when running in parallel, so dots are
+  // driven by the completed/active title sets rather than list position.
   const items = progressLinksScroll.querySelectorAll('.link-item');
+  const completed = new Set(msg.completed || []);
+  const active = new Set((msg.active || []).map(a => a.title));
   let activeItem = null;
-  items.forEach((item, i) => {
+  items.forEach((item) => {
     const dot = item.querySelector('.link-dot');
     if (!dot) return;
     const name = item.dataset.name;
     dot.className = 'link-dot';
-    if (i < done) {
+    if (completed.has(name)) {
       dot.classList.add('done');
-    } else if (name === current) {
+    } else if (active.has(name)) {
       dot.classList.add('active');
-      activeItem = item;
+      if (!activeItem) activeItem = item;
     }
   });
   if (activeItem && progressLinksScroll.offsetParent !== null) {
@@ -352,12 +419,12 @@ startBtn.addEventListener('click', () => {
 
   if (!port) connectPort();
   renderProgressList(selected);
+  clearActiveFiles();
   port.postMessage({ action: 'startQueue', links: selected });
   show(progressArea);
   progressBar.style.width = '0%';
   progressFraction.textContent = `0 / ${selected.length}`;
-  currentFile.textContent = '';
-  updateFileProgress(0, 0);
+  activeFilesTitle.textContent = 'Downloading';
 });
 
 cancelBtn.addEventListener('click', () => {
@@ -414,4 +481,36 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
       if (activeTab && activeTab.id === tabId) refreshHumbleState(tab);
     });
   }
+});
+
+/* ---------------- settings ---------------- */
+
+const SETTINGS_KEY = 'maxParallel';
+const DEFAULT_MAX_PARALLEL = 4;
+const MAX_PARALLEL_LIMIT = 8;
+
+function clampMaxParallel(value) {
+  const n = parseInt(value, 10);
+  if (!Number.isFinite(n)) return DEFAULT_MAX_PARALLEL;
+  return Math.min(MAX_PARALLEL_LIMIT, Math.max(1, n));
+}
+
+settingsBtn.addEventListener('click', async () => {
+  const stored = await chrome.storage.local.get(SETTINGS_KEY);
+  maxParallelInput.value = clampMaxParallel(stored[SETTINGS_KEY]);
+  hide(mainView);
+  show(settingsView);
+});
+
+backBtn.addEventListener('click', () => {
+  hide(settingsView);
+  show(mainView);
+});
+
+// Saved on change; the background service worker watches this storage key
+// and applies the new limit immediately, even to a run that's already going.
+maxParallelInput.addEventListener('change', () => {
+  const value = clampMaxParallel(maxParallelInput.value);
+  maxParallelInput.value = value;
+  chrome.storage.local.set({ [SETTINGS_KEY]: value });
 });

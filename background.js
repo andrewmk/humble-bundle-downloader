@@ -1,10 +1,12 @@
-// Background service worker: manages the sequential download queue
+// Background service worker: manages the download queue, downloading up to
+// `maxParallel` files at a time. The limit is configurable from the side
+// panel's Settings screen (stored in chrome.storage.local).
 //
 // IMPORTANT: MV3 service workers can be terminated by Chrome after ~30s of
 // inactivity, including mid-download while waiting on a large file. Chrome
 // re-wakes the worker for genuine extension events like
-// chrome.downloads.onChanged, so the download itself (tracked natively by
-// Chrome's download manager) keeps going. But all in-memory state here is
+// chrome.downloads.onChanged, so the downloads themselves (tracked natively
+// by Chrome's download manager) keep going. But all in-memory state here is
 // wiped on restart, so we persist the queue/progress to session storage and
 // restore it on startup, and any connected panels reconnect their ports.
 
@@ -12,15 +14,50 @@ chrome.sidePanel
   .setPanelBehavior({ openPanelOnActionClick: true })
   .catch((error) => console.error(error));
 
-let queue = [];
-let allItems = []; // full original list for the active run, for panels that (re)connect mid-download
-let isDownloading = false;
-let currentDownloadId = null;
+// --- settings ---
+
+const SETTINGS_KEY = 'maxParallel';
+const DEFAULT_MAX_PARALLEL = 4;
+const MAX_PARALLEL_LIMIT = 8;
+
+function clampMaxParallel(value) {
+  const n = parseInt(value, 10);
+  if (!Number.isFinite(n)) return DEFAULT_MAX_PARALLEL;
+  return Math.min(MAX_PARALLEL_LIMIT, Math.max(1, n));
+}
+
+let maxParallel = DEFAULT_MAX_PARALLEL;
+
+async function loadSettings() {
+  try {
+    const stored = await chrome.storage.local.get(SETTINGS_KEY);
+    maxParallel = clampMaxParallel(stored[SETTINGS_KEY]);
+  } catch (err) {
+    console.error('Failed to load settings:', err);
+  }
+}
+
+// The Settings screen writes the new limit to local storage. React here so
+// the change applies without a reload — including to a run that's already in
+// progress (raising the limit starts more queued downloads right away).
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== 'local' || !changes[SETTINGS_KEY]) return;
+  const next = clampMaxParallel(changes[SETTINGS_KEY].newValue);
+  if (next === maxParallel) return;
+  maxParallel = next;
+  console.log(`Simultaneous downloads set to ${next}`);
+  if (isDownloading) advanceQueue();
+});
+
+// --- queue state ---
+
+let queue = [];            // items waiting for a free download slot
+let inFlight = new Map();  // chrome downloadId -> { title, url, bytesReceived, totalBytes }
+let starting = new Set();  // items whose chrome.downloads.download() call is still pending
+let allItems = [];         // full original list for the active run, for panels that (re)connect mid-download
+let isDownloading = false; // true while a run is active (anything queued or in flight)
 const panelPorts = new Set();
-let progress = {
-  done: 0, total: 0, current: '', status: 'idle',
-  currentBytesReceived: 0, currentTotalBytes: 0
-};
+let progress = { done: 0, total: 0, status: 'idle', completed: [] };
 let pollTimer = null;
 
 const STATE_KEY = 'downloadQueueState';
@@ -28,7 +65,13 @@ const STATE_KEY = 'downloadQueueState';
 async function persistState() {
   try {
     await chrome.storage.session.set({
-      [STATE_KEY]: { queue, allItems, progress, currentDownloadId }
+      [STATE_KEY]: {
+        queue,
+        inFlight: Array.from(inFlight.entries()),
+        starting: [...starting],
+        allItems,
+        progress,
+      }
     });
   } catch (err) {
     console.error('Failed to persist state:', err);
@@ -44,54 +87,114 @@ async function restoreState() {
     queue = saved.queue || [];
     allItems = saved.allItems || [];
     progress = saved.progress || progress;
-    currentDownloadId = saved.currentDownloadId ?? null;
+    inFlight = new Map(saved.inFlight || []);
+    starting = new Set(saved.starting || []);
     isDownloading = false;
 
-    if (currentDownloadId !== null) {
-      // A download may have finished (or failed) while the worker was
-      // asleep. Check its actual state rather than assuming it's still
-      // running, since we won't have missed the onChanged event that
-      // would've woken us — but we may have missed intermediate ones.
-      const [item] = await chrome.downloads.search({ id: currentDownloadId });
-      if (!item || item.state === 'complete') {
-        queue.shift();
-        progress.done++;
-        currentDownloadId = null;
-        progress.currentBytesReceived = 0;
-        progress.currentTotalBytes = 0;
-        await persistState();
-        downloadNext();
-      } else if (item.state === 'interrupted') {
-        queue.shift();
-        progress.done++;
-        currentDownloadId = null;
-        progress.status = 'error';
-        progress.currentBytesReceived = 0;
-        progress.currentTotalBytes = 0;
-        await persistState();
-        downloadNext();
-      } else {
-        // Still in_progress: resume polling so per-file progress keeps
-        // updating; onChanged will fire normally when it settles.
-        progress.currentBytesReceived = item.bytesReceived;
-        progress.currentTotalBytes = item.totalBytes;
-        startPolling(currentDownloadId);
+    const wasRunning =
+      progress.status === 'queued' ||
+      progress.status === 'downloading' ||
+      progress.status === 'error';
+    if (!wasRunning) return;
+
+    // A download may have finished (or failed) while the worker was asleep.
+    // Check each in-flight download's actual state rather than assuming it's
+    // still running, since we may have missed the onChanged events that
+    // would have settled them.
+    const stillActive = new Map();
+    for (const item of starting) {
+      // Its download call was in flight when the worker died, so we never
+      // learned the download id. The download may have started in Chrome
+      // anyway — adopt it if we can find it, otherwise start it again.
+      let dl = null;
+      try {
+        const results = await chrome.downloads.search({ url: item.url });
+        dl = results.find(r => r.state === 'in_progress' || r.state === 'complete') || null;
+      } catch (err) {
+        console.error('Failed to look up pending download:', err);
       }
-    } else if (queue.length > 0) {
-      // Queue exists but nothing was in flight — resume it.
-      downloadNext();
+      if (dl && dl.state === 'complete') {
+        progress.done++;
+        progress.completed.push(item.title);
+      } else if (dl) {
+        stillActive.set(dl.id, {
+          title: item.title, url: item.url,
+          bytesReceived: dl.bytesReceived, totalBytes: dl.totalBytes,
+        });
+      } else {
+        queue.unshift(item);
+      }
+    }
+    starting.clear();
+
+    for (const [id, item] of inFlight) {
+      const [dl] = await chrome.downloads.search({ id });
+      if (!dl || dl.state === 'complete') {
+        progress.done++;
+        progress.completed.push(item.title);
+      } else if (dl.state === 'interrupted') {
+        progress.done++;
+        progress.completed.push(item.title);
+        progress.status = 'error';
+      } else {
+        // Still in_progress: carry its byte counters over so per-file
+        // progress keeps updating; onChanged will fire normally on settle.
+        stillActive.set(id, {
+          ...item,
+          bytesReceived: dl.bytesReceived,
+          totalBytes: dl.totalBytes,
+        });
+      }
+    }
+    inFlight = stillActive;
+    await persistState();
+
+    if (queue.length > 0 || inFlight.size > 0) {
+      isDownloading = true;
+      if (inFlight.size > 0) startPolling();
+      advanceQueue();
     }
   } catch (err) {
     console.error('Failed to restore state:', err);
   }
 }
 
-restoreState();
+// Startup work that must finish before we act on panel messages or start
+// anything: a start/cancel message that raced a mid-restore state could
+// otherwise apply a stale parallelism limit or be clobbered by the restore.
+const ready = (async () => {
+  await loadSettings();
+  await restoreState();
+})();
+
+// --- progress reporting ---
+
+function buildProgressMessage() {
+  const active = [];
+  for (const item of inFlight.values()) {
+    active.push({
+      title: item.title,
+      url: item.url,
+      bytesReceived: item.bytesReceived || 0,
+      totalBytes: item.totalBytes || 0,
+    });
+  }
+  return {
+    type: 'progress',
+    done: progress.done,
+    total: progress.total,
+    status: progress.status,
+    active,
+    completed: progress.completed.slice(),
+    items: allItems,
+  };
+}
 
 function broadcastProgress() {
   persistState();
+  const msg = buildProgressMessage();
   for (const port of panelPorts) {
-    try { port.postMessage({ type: 'progress', ...progress, items: allItems }); } catch {}
+    try { port.postMessage(msg); } catch {}
   }
 }
 
@@ -102,43 +205,60 @@ function stopPolling() {
   }
 }
 
-function startPolling(downloadId) {
+function startPolling() {
   stopPolling();
-  pollTimer = setInterval(async () => {
-    if (currentDownloadId !== downloadId) { stopPolling(); return; }
+  pollTimer = setInterval(pollInFlight, 500);
+}
+
+async function pollInFlight() {
+  if (inFlight.size === 0) { stopPolling(); return; }
+  for (const [id, item] of [...inFlight]) {
     try {
-      const [item] = await chrome.downloads.search({ id: downloadId });
-      if (!item) return;
+      const [dl] = await chrome.downloads.search({ id });
+      if (!dl) continue;
       // in_progress items report live bytesReceived/totalBytes; other
       // states are handled by the onChanged listener, not here.
-      if (item.state === 'in_progress') {
-        progress.currentBytesReceived = item.bytesReceived;
-        progress.currentTotalBytes = item.totalBytes; // 0/-1 if unknown (e.g. chunked response)
-        broadcastProgress();
+      if (dl.state === 'in_progress') {
+        item.bytesReceived = dl.bytesReceived;
+        item.totalBytes = dl.totalBytes; // 0/-1 if unknown (e.g. chunked response)
       }
     } catch (err) {
       console.error('Progress poll failed:', err);
     }
-  }, 500);
+  }
+  broadcastProgress();
 }
 
-async function downloadNext() {
-  if (isDownloading || queue.length === 0) {
-    if (queue.length === 0 && progress.total > 0) {
-      progress.status = 'done';
-      broadcastProgress();
-    }
-    return;
+// --- queue management (up to maxParallel downloads at once) ---
+
+// Fill every free download slot from the queue. Called when a run starts,
+// whenever a download settles (freeing a slot), and whenever the parallelism
+// limit increases mid-run. `starting` is counted as busy too: a slot is held
+// from the moment we kick off a download until it's registered or fails, so
+// the run can never be declared finished while starts are still pending.
+function advanceQueue() {
+  if (!isDownloading) return;
+
+  while (inFlight.size + starting.size < maxParallel && queue.length > 0) {
+    const item = queue.shift();
+    starting.add(item);
+    startDownload(item);
   }
 
-  isDownloading = true;
-  const item = queue[0];
-  progress.current = item.title;
-  progress.status = 'downloading';
-  progress.currentBytesReceived = 0;
-  progress.currentTotalBytes = 0;
-  broadcastProgress();
+  if (queue.length === 0 && inFlight.size === 0 && starting.size === 0) {
+    finishRun();
+  }
+}
 
+function finishRun() {
+  isDownloading = false;
+  progress.status = 'done';
+  stopPolling();
+  broadcastProgress();
+}
+
+async function startDownload(item) {
+  progress.status = 'downloading';
   try {
     const downloadId = await chrome.downloads.download({
       url: item.url,
@@ -146,107 +266,116 @@ async function downloadNext() {
       saveAs: false,
       conflictAction: 'uniquify'
     });
-    currentDownloadId = downloadId;
+
+    starting.delete(item);
+
+    // The run may have been cancelled while the download call was pending;
+    // don't resurrect it.
+    if (!isDownloading) {
+      chrome.downloads.cancel(downloadId).catch(() => {});
+      return;
+    }
+
+    inFlight.set(downloadId, {
+      title: item.title, url: item.url, bytesReceived: 0, totalBytes: 0
+    });
     await persistState();
-    startPolling(downloadId);
+    startPolling();
+    broadcastProgress();
   } catch (err) {
+    starting.delete(item);
     console.error('Download failed:', err);
-    stopPolling();
-    queue.shift();
+    // Count the failed start as handled and keep the queue moving (same
+    // behavior the old sequential code had for a failed download).
     progress.done++;
-    isDownloading = false;
-    currentDownloadId = null;
+    progress.completed.push(item.title);
     progress.status = 'error';
     broadcastProgress();
-    downloadNext();
+    advanceQueue();
   }
 }
 
+// Settle a finished/failed download: update counters, then fill the freed
+// slot. Guarded so a download can never be counted twice.
+function settleDownload(downloadId, completed) {
+  if (!inFlight.has(downloadId)) return;
+  const item = inFlight.get(downloadId);
+  inFlight.delete(downloadId);
+
+  progress.done++;
+  progress.completed.push(item.title);
+  progress.status = completed ? 'downloading' : 'error';
+  if (!completed) console.warn('Download interrupted:', item.title);
+
+  broadcastProgress();
+  advanceQueue();
+}
+
 chrome.downloads.onChanged.addListener((delta) => {
-  if (delta.id !== currentDownloadId) return;
+  if (!inFlight.has(delta.id)) return;
 
   const state = delta.state?.current;
-
   if (state === 'complete') {
-    stopPolling();
-    queue.shift();
-    progress.done++;
-    isDownloading = false;
-    currentDownloadId = null;
-    progress.currentBytesReceived = 0;
-    progress.currentTotalBytes = 0;
-    broadcastProgress();
-    downloadNext();
+    settleDownload(delta.id, true);
   } else if (state === 'interrupted') {
-    console.warn('Download interrupted:', delta);
-    stopPolling();
-    queue.shift();
-    progress.done++;
-    isDownloading = false;
-    currentDownloadId = null;
-    progress.status = 'error';
-    progress.currentBytesReceived = 0;
-    progress.currentTotalBytes = 0;
-    broadcastProgress();
-    downloadNext();
+    settleDownload(delta.id, false);
   }
 });
 
-chrome.runtime.onConnect.addListener((port) => {
-  if (port.name === 'sidepanel') {
-    panelPorts.add(port);
-    port.postMessage({ type: 'progress', ...progress, items: allItems });
+// --- side panel connections ---
 
-    port.onMessage.addListener((msg) => {
-      if (msg.action === 'startQueue') {
-        stopPolling();
-        queue = msg.links.slice();
-        allItems = msg.links.slice();
-        progress = {
-          done: 0, total: queue.length, current: '', status: 'queued',
-          currentBytesReceived: 0, currentTotalBytes: 0
-        };
-        isDownloading = false;
-        currentDownloadId = null;
-        broadcastProgress();
-        downloadNext();
-      } else if (msg.action === 'cancelQueue') {
+chrome.runtime.onConnect.addListener((port) => {
+  if (port.name !== 'sidepanel') return;
+  panelPorts.add(port);
+  port.postMessage(buildProgressMessage());
+
+  port.onMessage.addListener(async (msg) => {
+    await ready;
+    if (msg.action === 'startQueue') {
+      stopPolling();
+      queue = msg.links.slice();
+      allItems = msg.links.slice();
+      inFlight = new Map();
+      starting = new Set();
+      progress = {
+        done: 0, total: queue.length, status: 'queued', completed: []
+      };
+      isDownloading = true;
+      broadcastProgress();
+      advanceQueue();
+    } else if (msg.action === 'cancelQueue') {
+      isDownloading = false;
+      queue = [];
+      stopPolling();
+      for (const id of [...inFlight.keys()]) {
+        chrome.downloads.cancel(id).catch(() => {});
+      }
+      inFlight = new Map();
+      starting.clear();
+      progress.status = 'cancelled';
+      broadcastProgress();
+    } else if (msg.action === 'getProgress') {
+      port.postMessage(buildProgressMessage());
+    } else if (msg.action === 'acknowledgeDone') {
+      // User dismissed the done/cancelled screen ("Start over"). Reset to
+      // idle so this terminal status doesn't keep reappearing on future
+      // reconnects (new panel opens, service-worker restarts, etc).
+      if (progress.status === 'done' || progress.status === 'cancelled') {
         stopPolling();
         queue = [];
-        if (currentDownloadId !== null) {
-          chrome.downloads.cancel(currentDownloadId);
-          currentDownloadId = null;
-        }
+        allItems = [];
+        inFlight = new Map();
+        starting.clear();
         isDownloading = false;
-        progress.status = 'cancelled';
-        progress.currentBytesReceived = 0;
-        progress.currentTotalBytes = 0;
+        progress = { done: 0, total: 0, status: 'idle', completed: [] };
         broadcastProgress();
-      } else if (msg.action === 'getProgress') {
-        port.postMessage({ type: 'progress', ...progress, items: allItems });
-      } else if (msg.action === 'acknowledgeDone') {
-        // User dismissed the done/cancelled screen ("Start over"). Reset to
-        // idle so this terminal status doesn't keep reappearing on future
-        // reconnects (new panel opens, service-worker restarts, etc).
-        if (progress.status === 'done' || progress.status === 'cancelled') {
-          stopPolling();
-          queue = [];
-          allItems = [];
-          currentDownloadId = null;
-          isDownloading = false;
-          progress = {
-            done: 0, total: 0, current: '', status: 'idle',
-            currentBytesReceived: 0, currentTotalBytes: 0
-          };
-          broadcastProgress();
-        }
       }
-    });
+    }
+  });
 
-    port.onDisconnect.addListener(() => {
-      panelPorts.delete(port);
-    });
-  }
+  port.onDisconnect.addListener(() => {
+    panelPorts.delete(port);
+  });
 });
 
 function sanitizeFilename(name) {

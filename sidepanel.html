@@ -47,6 +47,20 @@
       margin-top: 1px;
     }
 
+    .header-gear {
+      margin-left: auto;
+      background: rgba(255,255,255,0.14);
+      border: none;
+      border-radius: 6px;
+      color: #fff;
+      font-size: 15px;
+      line-height: 1;
+      padding: 6px 9px;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    .header-gear:hover { background: rgba(255,255,255,0.28); }
+
     .body {
       padding: 16px 18px;
     }
@@ -254,13 +268,68 @@
       background: linear-gradient(90deg, #3a6ea5, #5b9bd5);
     }
 
-    .current-file {
+    /* In-flight download rows in the progress view */
+    .active-file { margin-bottom: 10px; }
+    .active-file:last-child { margin-bottom: 0; }
+
+    .active-file-name {
       font-size: 10px;
-      color: #888aaa;
-      margin-top: 6px;
+      color: #c0c0e0;
+      margin-bottom: 4px;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
+    }
+
+    .active-file-meta {
+      font-size: 10px;
+      color: #888aaa;
+      margin-top: 4px;
+    }
+
+    /* Settings screen */
+    .settings-title {
+      font-size: 13px;
+      font-weight: 700;
+      color: #e8e8f0;
+      margin: 14px 0 12px;
+    }
+
+    .setting-card {
+      background: #22223a;
+      border: 1px solid #33334f;
+      border-radius: 8px;
+      padding: 12px 14px;
+    }
+
+    .setting-label {
+      display: block;
+      font-size: 12px;
+      font-weight: 600;
+      color: #e8e8f0;
+    }
+
+    .setting-desc {
+      font-size: 11px;
+      color: #8888aa;
+      margin: 6px 0 10px;
+      line-height: 1.5;
+    }
+
+    .setting-input {
+      width: 84px;
+      background: #1a1a2e;
+      border: 1px solid #3a3a60;
+      border-radius: 6px;
+      color: #e8e8f0;
+      font-size: 14px;
+      font-weight: 600;
+      padding: 7px 10px;
+      text-align: center;
+    }
+    .setting-input:focus {
+      outline: none;
+      border-color: #e8720c;
     }
 
     .status-done {
@@ -282,11 +351,13 @@
     <div class="header-icon">📦</div>
     <div>
       <h1>Humble Downloader</h1>
-      <p>Sequential comic &amp; book downloader</p>
+      <p>Comic &amp; book downloader</p>
     </div>
+    <button class="header-gear" id="settings-btn" title="Settings" aria-label="Settings">⚙</button>
   </div>
 
   <div class="body">
+    <div id="main-view">
     <div id="not-on-humble" style="display: none;">
       <div class="warning-icon">⚠️</div>
       <div style="font-size:12px; color:#ccccee;">Navigate to your Humble Bundle library page first.</div>
@@ -324,15 +395,10 @@
       <div class="progress-bar-track">
         <div class="progress-bar-fill" id="progress-bar"></div>
       </div>
-      <div class="current-file" id="current-file"></div>
-
-      <div class="progress-label" id="file-progress-label" style="margin-top:12px">
-        <span>Current file</span>
-        <span id="file-progress-fraction"></span>
+      <div class="progress-label" style="margin-top:12px">
+        <span id="active-files-title">Downloading</span>
       </div>
-      <div class="progress-bar-track">
-        <div class="progress-bar-fill file-progress-bar-fill" id="file-progress-bar"></div>
-      </div>
+      <div id="active-files"></div>
 
       <div class="links-scroll" id="progress-links-scroll" style="margin-top:12px"></div>
       <button class="btn btn-danger" id="cancel-btn">✕ Cancel</button>
@@ -341,6 +407,18 @@
     <div id="done-area" style="display:none">
       <div class="status-done">✅ All downloads complete!</div>
       <button class="btn btn-secondary" id="restart-btn" style="margin-top:10px">↺ Start over</button>
+    </div>
+    </div><!-- /main-view -->
+
+    <div id="settings-view" style="display:none">
+      <button class="btn btn-secondary" id="back-btn" style="margin-top:0">← Back</button>
+      <div class="settings-title">Settings</div>
+      <div class="setting-card">
+        <label class="setting-label" for="max-parallel-input">Simultaneous downloads</label>
+        <div class="setting-desc">How many files to download at the same time. Use 1 to download one at a time.</div>
+        <input type="number" id="max-parallel-input" class="setting-input" min="1" max="8" step="1">
+      </div>
+      <div class="hint">Applies immediately, including to a download that's already running.</div>
     </div>
   </div>
 
