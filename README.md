@@ -13,10 +13,10 @@ A Chrome extension that downloads comics and books from your Humble Bundle libra
 ## Usage
 
 0. I'd highly recommend in Chrome going into Settings, Downloads and turning off "Ask where to save each file before downloading" or you're going to get bored clicking
-1. Open your Humble Bundle library/download page  
-   (e.g. `https://www.humblebundle.com/downloads?key=YOURKEY`)
+1. Open the bundle's page in your Humble Library  
+   (e.g. `https://www.humblebundle.com/home/library/YOUR-BUNDLE-ID`) — each bundle in a purchase has its own library page
 2. Click the extension icon in the Chrome toolbar — this opens the side panel, which stays docked to the browser window as you navigate
-3. Click **Scan for Links** — it will find all comic and book download links on the page
+3. Click **Scan for Files** — it will find every downloadable file on the page (one entry per format: EPUB, PDF, MOBI, …)
 4. Review the list, check or uncheck any titles you don't want, then click **Download Selected**
 5. Files download in parallel — by default up to 4 at a time (see **Settings** below)
 
@@ -33,6 +33,7 @@ Click the ⚙ gear in the side panel header to open the settings screen.
 - Works with whatever formats Humble Bundle offers for a given title (PDF, EPUB, MOBI, CBZ, CBR, etc.) — the extension keeps each file's original format
 - You can cancel mid-queue at any time
 - When downloads run in parallel, files may finish out of order — the progress list reflects each file's actual state
+- Works on both the classic download pages and the new library pages (`humblebundle.com/home/library/…`). The new pages don't expose file links, so the extension clicks each file's download button and captures the short-lived signed link the page generates, then downloads it itself
 - The extension only activates on `humblebundle.com` pages
 - The side panel persists across tab switches and page navigation within the window; it automatically updates based on whether or not you're on a Humble Bundle page
 

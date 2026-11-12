@@ -56,6 +56,7 @@ let inFlight = new Map();  // chrome downloadId -> { title, url, bytesReceived, 
 let starting = new Set();  // items whose chrome.downloads.download() call is still pending
 let allItems = [];         // full original list for the active run, for panels that (re)connect mid-download
 let isDownloading = false; // true while a run is active (anything queued or in flight)
+let runTabId = null;       // tab showing the library page, for resolving signed URLs
 const panelPorts = new Set();
 let progress = { done: 0, total: 0, status: 'idle', completed: [] };
 let pollTimer = null;
@@ -71,6 +72,7 @@ async function persistState() {
         starting: [...starting],
         allItems,
         progress,
+        tabId: runTabId,
       }
     });
   } catch (err) {
@@ -91,6 +93,8 @@ async function restoreState() {
     starting = new Set(saved.starting || []);
     isDownloading = false;
 
+    runTabId = saved.tabId ?? null;
+
     const wasRunning =
       progress.status === 'queued' ||
       progress.status === 'downloading' ||
@@ -106,19 +110,22 @@ async function restoreState() {
       // Its download call was in flight when the worker died, so we never
       // learned the download id. The download may have started in Chrome
       // anyway — adopt it if we can find it, otherwise start it again.
+      // (Items without a resolved URL can't be looked up; just re-queue them.)
       let dl = null;
-      try {
-        const results = await chrome.downloads.search({ url: item.url });
-        dl = results.find(r => r.state === 'in_progress' || r.state === 'complete') || null;
-      } catch (err) {
-        console.error('Failed to look up pending download:', err);
+      if (item.url) {
+        try {
+          const results = await chrome.downloads.search({ url: item.url });
+          dl = results.find(r => r.state === 'in_progress' || r.state === 'complete') || null;
+        } catch (err) {
+          console.error('Failed to look up pending download:', err);
+        }
       }
       if (dl && dl.state === 'complete') {
         progress.done++;
-        progress.completed.push(item.title);
+        progress.completed.push(itemLabel(item));
       } else if (dl) {
         stillActive.set(dl.id, {
-          title: item.title, url: item.url,
+          title: item.title, url: item.url, format: item.format, uid: item.uid,
           bytesReceived: dl.bytesReceived, totalBytes: dl.totalBytes,
         });
       } else {
@@ -131,10 +138,10 @@ async function restoreState() {
       const [dl] = await chrome.downloads.search({ id });
       if (!dl || dl.state === 'complete') {
         progress.done++;
-        progress.completed.push(item.title);
+        progress.completed.push(itemLabel(item));
       } else if (dl.state === 'interrupted') {
         progress.done++;
-        progress.completed.push(item.title);
+        progress.completed.push(itemLabel(item));
         progress.status = 'error';
       } else {
         // Still in_progress: carry its byte counters over so per-file
@@ -173,7 +180,7 @@ function buildProgressMessage() {
   const active = [];
   for (const item of inFlight.values()) {
     active.push({
-      title: item.title,
+      title: itemLabel(item),
       url: item.url,
       bytesReceived: item.bytesReceived || 0,
       totalBytes: item.totalBytes || 0,
@@ -260,9 +267,19 @@ function finishRun() {
 async function startDownload(item) {
   progress.status = 'downloading';
   try {
+    // New library pages don't expose URLs up front: ask the page to click
+    // this file's download button and hand back the signed URL it captured.
+    if (!item.url) {
+      const url = await resolveUrlFromPage(item);
+      if (url) item.url = url; // remember it for filename/state-restore
+    }
+    if (!item.url) throw new Error('no download url available');
+
     const downloadId = await chrome.downloads.download({
       url: item.url,
-      filename: sanitizeFilename(item.title) + getExtension(item.url),
+      filename:
+        sanitizeFilename(item.format ? `${item.title} (${item.format})` : item.title) +
+        getExtension(item),
       saveAs: false,
       conflictAction: 'uniquify'
     });
@@ -277,7 +294,8 @@ async function startDownload(item) {
     }
 
     inFlight.set(downloadId, {
-      title: item.title, url: item.url, bytesReceived: 0, totalBytes: 0
+      title: item.title, url: item.url, format: item.format, uid: item.uid,
+      bytesReceived: 0, totalBytes: 0
     });
     await persistState();
     startPolling();
@@ -288,10 +306,29 @@ async function startDownload(item) {
     // Count the failed start as handled and keep the queue moving (same
     // behavior the old sequential code had for a failed download).
     progress.done++;
-    progress.completed.push(item.title);
+    progress.completed.push(itemLabel(item));
     progress.status = 'error';
     broadcastProgress();
     advanceQueue();
+  }
+}
+
+// Ask the content script on the library page to click this item's download
+// button (with window.open hooked) and return the signed URL it captured.
+async function resolveUrlFromPage(item) {
+  if (!runTabId) return null;
+  try {
+    const res = await chrome.tabs.sendMessage(runTabId, {
+      action: 'getDownloadUrl',
+      uid: item.uid,
+    });
+    if (res?.ok && res.url) return res.url;
+    console.error('URL resolution failed:', res?.error || 'no response');
+    return null;
+  } catch (err) {
+    // Tab closed or navigated away from the page, content script gone, etc.
+    console.error('Could not reach page to resolve URL:', err);
+    return null;
   }
 }
 
@@ -303,9 +340,9 @@ function settleDownload(downloadId, completed) {
   inFlight.delete(downloadId);
 
   progress.done++;
-  progress.completed.push(item.title);
+  progress.completed.push(itemLabel(item));
   progress.status = completed ? 'downloading' : 'error';
-  if (!completed) console.warn('Download interrupted:', item.title);
+  if (!completed) console.warn('Download interrupted:', itemLabel(item));
 
   broadcastProgress();
   advanceQueue();
@@ -335,6 +372,7 @@ chrome.runtime.onConnect.addListener((port) => {
       stopPolling();
       queue = msg.links.slice();
       allItems = msg.links.slice();
+      runTabId = msg.tabId ?? null;
       inFlight = new Map();
       starting = new Set();
       progress = {
@@ -346,6 +384,7 @@ chrome.runtime.onConnect.addListener((port) => {
     } else if (msg.action === 'cancelQueue') {
       isDownloading = false;
       queue = [];
+      runTabId = null;
       stopPolling();
       for (const id of [...inFlight.keys()]) {
         chrome.downloads.cancel(id).catch(() => {});
@@ -364,6 +403,7 @@ chrome.runtime.onConnect.addListener((port) => {
         stopPolling();
         queue = [];
         allItems = [];
+        runTabId = null;
         inFlight = new Map();
         starting.clear();
         isDownloading = false;
@@ -387,9 +427,16 @@ function sanitizeFilename(name) {
     || 'humble_download';
 }
 
-function getExtension(url) {
-  // Comics and books come in many formats (pdf, epub, mobi, cbz, cbr...);
-  // pull the real extension from the download URL instead of assuming one.
+// Same label the side panel shows for an item; used as the identity in the
+// progress "completed" list. Multiple formats of the same book share a
+// title, so the format must be part of the identity.
+function itemLabel(item) {
+  if (item.format) return `${item.title} (${String(item.format).toUpperCase()})`;
+  const ext = item.url ? extensionFromUrl(item.url) : '';
+  return ext ? `${item.title} (${ext.slice(1).toUpperCase()})` : item.title;
+}
+
+function extensionFromUrl(url) {
   try {
     const path = new URL(url).pathname;
     const match = path.match(/\.([a-z0-9]{1,6})$/i);
@@ -397,4 +444,13 @@ function getExtension(url) {
   } catch {
     return '';
   }
+}
+
+function getExtension(item) {
+  // Comics and books come in many formats (pdf, epub, mobi, cbz, cbr...);
+  // pull the real extension from the download URL, falling back to the
+  // format the page advertised for the file.
+  const fromUrl = item.url ? extensionFromUrl(item.url) : '';
+  if (fromUrl) return fromUrl;
+  return item.format ? '.' + String(item.format).toLowerCase() : '';
 }

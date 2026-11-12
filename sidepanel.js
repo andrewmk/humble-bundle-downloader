@@ -2,6 +2,7 @@ let port = null;
 let foundLinks = [];       // links in original page-scan order (never mutated)
 let isQueueActive = false; // true while a download queue is running/queued
 let sortMode = 'page';     // 'page' or 'alphabetical'
+let scanTabId = null;      // tab the links were scanned from (where the page lives)
 
 const scanArea = document.getElementById('scan-area');
 const notOnHumble = document.getElementById('not-on-humble');
@@ -251,7 +252,7 @@ function renderTypeChips(links) {
   // (PDF, EPUB, MOBI, CBZ, CBR...) rather than a fixed hardcoded list.
   const counts = new Map();
   links.forEach(link => {
-    const ext = getExtensionLabel(link.url) || 'Other';
+    const ext = getExtensionLabel(link) || 'Other';
     counts.set(ext, (counts.get(ext) || 0) + 1);
   });
 
@@ -273,7 +274,7 @@ function renderTypeChips(links) {
       const ext = chip.dataset.ext;
       linksScroll.querySelectorAll('.link-check').forEach(cb => {
         const link = foundLinks[Number(cb.dataset.index)];
-        cb.checked = (getExtensionLabel(link.url) || 'Other') === ext;
+        cb.checked = (getExtensionLabel(link) || 'Other') === ext;
       });
       updateSelectionUI();
     });
@@ -303,9 +304,9 @@ function updateSelectionUI() {
 
 function renderProgressList(links) {
   // Static (non-checkbox) dot list shown once downloads start.
-  progressLinksScroll.dataset.signature = links.map(l => l.title).join('|');
+  progressLinksScroll.dataset.signature = links.map(displayTitle).join('|');
   const markup = links.map(link =>
-    `<div class="link-item" data-name="${escHtml(link.title)}"><div class="link-dot"></div><div class="link-name" title="${escHtml(displayTitle(link))}">${escHtml(displayTitle(link))}</div></div>`
+    `<div class="link-item" data-name="${escHtml(displayTitle(link))}"><div class="link-dot"></div><div class="link-name" title="${escHtml(displayTitle(link))}">${escHtml(displayTitle(link))}</div></div>`
   ).join('');
   progressLinksScroll.innerHTML = markup;
 }
@@ -314,20 +315,26 @@ function escHtml(str) {
   return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
-function getExtensionLabel(url) {
+function getExtensionLabel(link) {
   // Mirrors the extension-detection in background.js, so the badge shown
-  // here always matches what the file is actually saved as.
-  try {
-    const path = new URL(url).pathname;
-    const match = path.match(/\.([a-z0-9]{1,6})$/i);
-    return match ? match[1].toUpperCase() : '';
-  } catch {
-    return '';
+  // here always matches what the file is actually saved as. New-style
+  // pages don't have a URL up front, so fall back to the format the page
+  // advertises for the file.
+  if (link.url) {
+    try {
+      const path = new URL(link.url).pathname;
+      const match = path.match(/\.([a-z0-9]{1,6})$/i);
+      if (match) return match[1].toUpperCase();
+    } catch {}
   }
+  return link.format ? String(link.format).toUpperCase() : '';
 }
 
+// Also the identity used for the progress dots — several formats of the same
+// book share a title, so the format has to be part of it. Mirrors
+// itemLabel() in background.js.
 function displayTitle(link) {
-  const ext = getExtensionLabel(link.url);
+  const ext = getExtensionLabel(link);
   return ext ? `${link.title} (${ext})` : link.title;
 }
 
@@ -353,18 +360,19 @@ async function scanPage() {
 
   try {
     console.log("Sending message to content script...");
-    const results = await chrome.tabs.sendMessage(tab.id, { action: 'getDownloadLinks' });
-    foundLinks = results?.links || [];
-    console.log("Got links: " + foundLinks.length);
+    const results = await chrome.tabs.sendMessage(tab.id, { action: 'getDownloadItems' });
+    foundLinks = dedupeItems(results?.items || []);
+    console.log("Got items: " + foundLinks.length);
   } catch(e) {
     // Content script might not be injected yet, try injecting
     await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['content.js'] });
-    const results = await chrome.tabs.sendMessage(tab.id, { action: 'getDownloadLinks' });
-    foundLinks = results?.links || [];
+    const results = await chrome.tabs.sendMessage(tab.id, { action: 'getDownloadItems' });
+    foundLinks = dedupeItems(results?.items || []);
   }
+  scanTabId = tab.id;
 
   scanBtn.disabled = false;
-  scanBtn.textContent = '🔍 Scan for Links';
+  scanBtn.textContent = '🔍 Scan for Files';
 
   if (foundLinks.length === 0) {
     scanBtn.textContent = '⚠️ Nothing found — try rescan';
@@ -374,6 +382,17 @@ async function scanPage() {
   renderLinks();
   hide(scanArea);
   show(linkList);
+}
+
+function dedupeItems(items) {
+  // The content script already dedupes, but a re-injected/late response
+  // could still contain repeats; key on uid (url for old-style pages).
+  const seen = new Set();
+  return items.filter((it) => {
+    if (!it || seen.has(it.uid)) return false;
+    seen.add(it.uid);
+    return true;
+  });
 }
 
 scanBtn.addEventListener('click', scanPage);
@@ -420,7 +439,9 @@ startBtn.addEventListener('click', () => {
   if (!port) connectPort();
   renderProgressList(selected);
   clearActiveFiles();
-  port.postMessage({ action: 'startQueue', links: selected });
+  // tabId tells the background where the library page is, so it can ask the
+  // content script to resolve each file's signed download URL on demand.
+  port.postMessage({ action: 'startQueue', links: selected, tabId: scanTabId });
   show(progressArea);
   progressBar.style.width = '0%';
   progressFraction.textContent = `0 / ${selected.length}`;
@@ -435,7 +456,7 @@ restartBtn.addEventListener('click', () => {
   hide(doneArea); hide(progressArea);
   foundLinks = [];
   show(scanArea);
-  scanBtn.textContent = '🔍 Scan for Links';
+  scanBtn.textContent = '🔍 Scan for Files';
   if (port) port.postMessage({ action: 'acknowledgeDone' });
 });
 

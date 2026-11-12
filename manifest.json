@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Humble Bundle Downloader",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "description": "Downloads comics and books from Humble Bundle, with a configurable number of files downloading at once (1-8, default 4).",
   "permissions": [
     "downloads",
@@ -27,6 +27,12 @@
     "service_worker": "background.js"
   },
   "content_scripts": [
+    {
+      "matches": ["https://www.humblebundle.com/*"],
+      "js": ["page-hook.js"],
+      "world": "MAIN",
+      "run_at": "document_start"
+    },
     {
       "matches": ["https://www.humblebundle.com/*"],
       "js": ["content.js"]
